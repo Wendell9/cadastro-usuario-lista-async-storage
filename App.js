@@ -1,16 +1,16 @@
 import React, { useState, useEffect } from "react";
 import { View, Text, TextInput, Button, StyleSheet, Alert } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import styles from "./styles";
-import { ScrollView, Keyboard, Image, TouchableOpacity } from 'react-native';
-import { FontAwesome, Entypo } from '@expo/vector-icons';
+import { ScrollView, Keyboard, Image, TouchableOpacity } from "react-native";
+import * as DbService from './services/dbservice';
+import Contato from './Componentes/Contato';
 
 // Defina o ícone do telefone. Você precisará de um ícone real ou de um local correto.
 // Por exemplo: const iconTelefone = require('./caminho/para/seu/icone.png');
 // Para este exemplo, vou usar apenas um ícone de texto.
 
 const App = () => {
-  const [codigo, setCodigo] = useState(''); // Use uma string vazia para o código para evitar confusão com o valor 0
+  const [codigo, setCodigo] = useState(""); // Use uma string vazia para o código para evitar confusão com o valor 0
   const [nome, setUserName] = useState("");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
@@ -20,9 +20,17 @@ const App = () => {
 
   const CONTATOS_KEY = "@contatos";
 
-  // Carrega os dados na inicialização do componente
+  async function processamentoUseEffect() {
+    try {
+      await DbService.createTable();
+      await carregaDados();
+    } catch (e) {
+      console.log(e);
+    }
+  }
+
   useEffect(() => {
-    carregaDados();
+    processamentoUseEffect(); //necessário método pois aqui não pode utilizar await...
   }, []);
 
   const saveUserData = async () => {
@@ -35,8 +43,15 @@ const App = () => {
         Alert.alert("Erro", "Por favor, preencha um email válido");
         return;
       }
-      if (senha.length < 5 || !verificarMaiuscula(senha) || !verificarNumero(senha)) {
-        Alert.alert("Erro", "A senha deve ter no mínimo 5 caracteres, 1 maiúscula e 1 número.");
+      if (
+        senha.length < 5 ||
+        !verificarMaiuscula(senha) ||
+        !verificarNumero(senha)
+      ) {
+        Alert.alert(
+          "Erro",
+          "A senha deve ter no mínimo 5 caracteres, 1 maiúscula e 1 número."
+        );
         return;
       }
       if (senha !== confirmacao_senha) {
@@ -48,12 +63,8 @@ const App = () => {
         return;
       }
 
-      // 1. Carregar a lista de contatos existente
-      const existingContatosJSON = await AsyncStorage.getItem(CONTATOS_KEY);
-      let contatosArray = existingContatosJSON ? JSON.parse(existingContatosJSON) : [];
+      let isNewRecord = (codigo == "");
 
-      // 2. Criar ou atualizar o objeto de contato
-      const isNewRecord = codigo != ""; // Se o código estiver vazio, é um novo registro
       let newContact = {
         codigo: isNewRecord ? createUniqueId() : codigo,
         nome,
@@ -61,30 +72,25 @@ const App = () => {
         senha,
       };
 
+      let resposta = false;
+
       if (isNewRecord) {
-        contatosArray.push(newContact); // Inclusão
+        resposta = await DbService.adicionaContato(newContact);
       } else {
-        const index = contatosArray.findIndex(c => c.codigo === codigo);
-        if (index > -1) {
-          contatosArray[index] = newContact; // Alteração
-        } else {
-          contatosArray.push(newContact); // Se não achou, adiciona como novo
-        }
+        resposta = await DbService.alteraContato(newContact);
       }
+      
+      if (resposta)
+        Alert.alert('Sucesso!');
+      else
+        Alert.alert('Falha!');
 
-      // 3. Salvar a lista completa de volta no AsyncStorage
-      const jsonValue = JSON.stringify(contatosArray);
-      await AsyncStorage.setItem(CONTATOS_KEY, jsonValue);
-
-      // 4. Atualizar o estado e limpar o formulário
-      setContatos(contatosArray);
-      limpaCampos();
-
-      Alert.alert('Sucesso', 'Dados salvos com sucesso!');
       Keyboard.dismiss();
+      limpaCampos();
+      await carregaDados();
 
     } catch (e) {
-      Alert.alert('Erro', e.toString());
+      Alert.alert("Erro", e.toString());
     }
   };
 
@@ -105,7 +111,7 @@ const App = () => {
   }
 
   function limpaCampos() {
-    setCodigo('');
+    setCodigo("");
     setUserName("");
     setEmail("");
     setSenha("");
@@ -114,40 +120,42 @@ const App = () => {
 
   async function carregaDados() {
     try {
-      const jsonValue = await AsyncStorage.getItem(CONTATOS_KEY);
-      if (jsonValue != null) {
-        setContatos(JSON.parse(jsonValue));
-      } else {
-        setContatos([]);
-      }
+      console.log("carregando");
+      let contatos = await DbService.obtemTodosContatos();
+      setContatos(contatos);
     } catch (e) {
       Alert.alert(e.toString());
     }
   }
 
   function removerElemento(identificador) {
-    Alert.alert('Atenção', 'Confirma a remoção do contato?',
-      [
-        { text: 'Sim', onPress: () => efetivaRemoverContato(identificador) },
-        { text: 'Não', style: 'cancel' }
-      ]
-    );
+    Alert.alert("Atenção", "Confirma a remoção do contato?", [
+      {
+        text: "Sim",
+        onPress: () => efetivaRemoverContato(identificador),
+      },
+      {
+        text: "Não",
+        style: "cancel",
+      },
+    ]);
   }
 
   async function efetivaRemoverContato(identificador) {
     try {
-      const contatoAux = contatos.filter(contato => contato.codigo !== identificador);
-      const jsonValue = JSON.stringify(contatoAux);
-      await AsyncStorage.setItem(CONTATOS_KEY, jsonValue);
-      setContatos(contatoAux);
-      Alert.alert('Sucesso', 'Contato apagado com sucesso!');
+      await DbService.excluiContato(identificador);
+      Keyboard.dismiss();
+      limpaCampos();
+      await carregaDados();
+      Alert.alert("Contato apagado com sucesso!!!");
     } catch (e) {
-      Alert.alert(e.toString());
+        Alert.alert("Erro", e.message); 
     }
   }
 
-  function editarContato(identificador) {
-    const contato = contatos.find(c => c.codigo === identificador);
+  function editarContato(codigo) {
+    const contato = contatos.find(contato => contato.codigo == codigo);
+    
     if (contato) {
       setCodigo(contato.codigo);
       setUserName(contato.nome);
@@ -155,70 +163,110 @@ const App = () => {
       setSenha(contato.senha);
       setConfirmacaoSenha(contato.senha);
     }
+
+    console.log(contato);
+  }
+
+    async function efetivaExclusao() {
+    try {
+      await DbService.excluiTodosContatos();
+      await carregaDados();
+    }
+    catch (e) {
+      Alert.alert(e);
+    }
+  }
+
+  function apagarTudo() {
+    if (
+      Alert.alert(
+        "Muita atenção!!!",
+        "Confirma a exclusão de todos os contatos?",
+        [
+          {
+            text: "Sim, confirmo!",
+            onPress: () => {
+              efetivaExclusao();
+            },
+          },
+          {
+            text: "Não!!!",
+            style: "cancel",
+          },
+        ]
+      )
+    );
   }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Cadastro de Usuário</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Código (preenchido automaticamente)"
-        value={codigo.toString()}
-        onChangeText={setCodigo}
-        keyboardType="numeric"
-        editable={false}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Digite seu nome"
-        value={nome}
-        onChangeText={setUserName}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Digite seu email"
-        value={email}
-        onChangeText={setEmail}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Digite sua senha"
-        value={senha}
-        onChangeText={setSenha}
-        secureTextEntry
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Confirme sua senha"
-        value={confirmacao_senha}
-        onChangeText={setConfirmacaoSenha}
-        secureTextEntry
-      />
-      <View style={styles.botoes}>
-        <Button title="Salvar" onPress={saveUserData} />
-        <Button title="Limpar" onPress={limpaCampos} />
+      <Text style={styles.tituloAgenda}>Cadastro de Usuário</Text>
+
+      <View style={styles.areaInput}>
+        <TextInput
+          style={styles.input}
+          placeholder="Código (preenchido automaticamente)"
+          value={(codigo ?? "").toString()}
+          onChangeText={setCodigo}
+          keyboardType="numeric"
+          editable={false}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Digite seu nome"
+          value={nome}
+          onChangeText={setUserName}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Digite seu email"
+          value={email}
+          onChangeText={setEmail}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Digite sua senha"
+          value={senha}
+          onChangeText={setSenha}
+          secureTextEntry
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Confirme sua senha"
+          value={confirmacao_senha}
+          onChangeText={setConfirmacaoSenha}
+          secureTextEntry
+        />
       </View>
-      <ScrollView style={styles.listaContatos} contentContainerStyle={{ alignItems: 'center' }} >
-        {
-          contatos.length > 0 ? (
-            contatos.map((contato, index) => (
-              <View style={styles.contato} key={contato.codigo}>
-                <Text style={styles.listaNome}>{contato.nome}</Text>
-                <Text style={styles.listaEmail}>{contato.email}</Text>
-                <View style={styles.dadosBotoesAcao}>
-                  <TouchableOpacity onPress={() => removerElemento(contato.codigo)}>
-                    <FontAwesome name="remove" size={32} color="red" />
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => editarContato(contato.codigo)}>
-                    <Entypo name="edit" size={32} color="black" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))
-          ) : (
-            <Text>Nenhum contato cadastrado.</Text>
-          )
-        }
+
+      <View style={styles.areaBotoes}>
+        <TouchableOpacity style={styles.botao} onPress={() => saveUserData()}>
+          <Text style={styles.textoBotao}>Salvar</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.botao} onPress={() => limpaCampos()}>
+          <Text style={styles.textoBotao}>Limpar</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.botao, styles.botaoApagarTudo]}
+          onPress={() => apagarTudo()}
+        >
+          <Text style={styles.textoBotao}>Apagar tudo</Text>
+        </TouchableOpacity>
+      </View>
+      <ScrollView
+        style={styles.listaContatos}
+        contentContainerStyle={{ alignItems: "center" }}
+      >
+        {contatos.length > 0 ? (
+          contatos.map((contato) => (
+            <Contato contato={contato} key={contato.codigo}
+              removerElemento={removerElemento} editarContato={editarContato} />
+          ))
+        ) : (
+          <Text>Nenhum contato cadastrado.</Text>
+        )}
       </ScrollView>
     </View>
   );
